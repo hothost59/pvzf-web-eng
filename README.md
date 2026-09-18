@@ -5,7 +5,7 @@ are stored as 15 MB pieces under `chunks/` and reassembled in the browser before
 engine starts.
 
 ```
-index.html            launcher (generated) - UI + embedded boot code
+index.html            launcher (generated) - Play button + progress bar
 index.template.html   source template for index.html
 boot.js               boot program: fetch -> verify -> createUnityInstance
 build.py              regenerates index.html from the template + boot.js
@@ -106,7 +106,7 @@ with `SOURCE = "local"`, then open <http://localhost:8099>.
   execute that.
 - `about:blank` opened via `window.open` inherits the launcher's origin, which is what
   lets the blob URLs and cross-origin fetches work. If the popup is blocked, the
-  launcher offers a "Play in this tab" fallback.
+  launcher loads the game in the current tab instead.
 - The build is assembled fully in memory: ~230 MB downloaded, ~1 GB RAM at peak.
   The browser HTTP cache covers later launches.
 - Saves live in IndexedDB under the launcher's origin, so moving the launcher to a

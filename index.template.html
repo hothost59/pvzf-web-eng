@@ -2,72 +2,36 @@
 <meta charset="utf-8">
 <title>Plants vs Zombies Fusion</title>
 <style>
-  :root{
-    --bg:#10180f; --panel:#1b2a19; --edge:#2f4a2c;
-    --ink:#e8f3e4; --dim:#9ab094; --accent:#8bc34a; --accent-ink:#10180f;
-  }
+  :root{ --bg:#10180f; --ink:#e8f3e4; --dim:#9ab094; --accent:#8bc34a; --track:#24341f; }
   html,body{height:100%;margin:0}
   body{
-    background:radial-gradient(ellipse at 50% -10%,#1e3019,var(--bg) 70%);
-    color:var(--ink);
-    font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
-    display:grid;place-items:center;padding:24px;box-sizing:border-box;
+    background:var(--bg); color:var(--ink);
+    font:15px/1.5 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    display:grid; place-items:center; padding:24px; box-sizing:border-box;
   }
-  .card{
-    width:100%;max-width:560px;background:var(--panel);
-    border:1px solid var(--edge);border-radius:14px;padding:28px 26px;
-    box-shadow:0 18px 50px rgba(0,0,0,.45);
-  }
-  h1{margin:0 0 4px;font-size:22px;letter-spacing:.2px}
-  .sub{margin:0 0 22px;color:var(--dim);font-size:13px}
+  .wrap{width:100%;max-width:380px}
   button{
-    appearance:none;border:0;border-radius:10px;cursor:pointer;
-    background:var(--accent);color:var(--accent-ink);
-    font:600 16px/1 inherit;padding:14px 22px;width:100%;
-    transition:filter .12s ease,transform .06s ease;
+    appearance:none;border:0;border-radius:10px;cursor:pointer;width:100%;
+    background:var(--accent);color:#10180f;font:600 16px/1 inherit;padding:14px 22px;
   }
   button:hover{filter:brightness(1.08)}
-  button:active{transform:translateY(1px)}
   button[disabled]{filter:grayscale(.6) brightness(.8);cursor:default}
-  .meta{margin-top:20px;border-top:1px solid var(--edge);padding-top:16px;
-        color:var(--dim);font-size:12.5px}
-  .meta code{color:var(--ink);background:#0d140c;padding:1px 5px;border-radius:4px;
-             font:12px/1 ui-monospace,SFMono-Regular,Menlo,monospace}
-  .row{display:flex;justify-content:space-between;gap:12px;padding:2px 0}
-  #note{margin-top:14px;font-size:13px;color:var(--dim);min-height:1.5em}
-  #note.bad{color:#ff8a7a}
+  .bar{height:10px;background:var(--track);border-radius:999px;overflow:hidden;margin-top:18px}
+  .fill{height:100%;width:0;background:var(--accent);transition:width .18s ease}
+  #msg{margin-top:10px;font-size:13px;color:var(--dim);min-height:1.2em;text-align:center}
+  #msg.bad{color:#ff8a7a}
 </style>
 
-<div class="card">
-  <h1>Plants vs Zombies Fusion</h1>
-  <p class="sub">WebGL build 2.0.4 &middot; English &middot; reassembled from 17 pieces</p>
-
+<div class="wrap">
   <button id="play">Play</button>
-  <div id="note"></div>
-
-  <div class="meta">
-    <div class="row"><span>Source</span><span id="m-src">&mdash;</span></div>
-    <div class="row"><span>Download</span><span id="m-size">&mdash;</span></div>
-    <div class="row"><span>Parts</span><span id="m-parts">&mdash;</span></div>
-    <p style="margin:12px 0 0">Opens in a blank tab. The whole build is fetched into
-    memory before the game starts, so the first launch takes a while and needs about
-    <strong>1&nbsp;GB</strong> of free RAM. Cached by the browser afterwards.</p>
-  </div>
+  <div class="bar" id="bar" hidden><div class="fill" id="fill"></div></div>
+  <div id="msg"></div>
 </div>
 
 <script>
 /* ------------------------------------------------------------------
    REPO     "user/repo@branch"
-   SOURCE   where the chunks are fetched from:
-              "jsdelivr" - cdn.jsdelivr.net. Works because each chunk is
-                           requested as its own file; jsDelivr only refuses
-                           when it has to package the repo. Cold files can
-                           answer 403 briefly - boot.js retries those.
-              "raw"      - raw.githubusercontent.com. No CDN, may rate-limit.
-              "local"    - same folder as this page (use with GitHub Pages).
-   Chunks are size-checked against manifest.json and the assembled files are
-   SHA-256 verified, because a dropped connection can return HTTP 200 with a
-   short body.
+   SOURCE   "jsdelivr" | "raw" | "local"  (see README)
    ------------------------------------------------------------------ */
 const REPO   = "hothost59/pvzf-web-eng@main";
 const SOURCE = "jsdelivr";
@@ -79,77 +43,67 @@ const BASE =
   SOURCE === "raw"      ? "https://raw.githubusercontent.com/" + REPO_PATH + "/" + REF + "/" :
                           new URL(".", location.href).href;
 
-const note = document.getElementById("note");
-const play = document.getElementById("play");
-
-function fmt(b) { return (b / 1048576).toFixed(0) + " MB"; }
-function bad(t) { note.className = "bad"; note.textContent = t; }
-
-document.getElementById("m-src").textContent =
-  SOURCE === "jsdelivr" ? "jsDelivr" :
-  SOURCE === "raw" ? "raw.githubusercontent.com" : "this site";
-
-fetch(BASE + "manifest.json").then(r => r.json()).then(m => {
-  const files = Object.values(m.files);
-  document.getElementById("m-size").textContent =
-    fmt(files.reduce((n, f) => n + f.total, 0));
-  document.getElementById("m-parts").textContent =
-    files.reduce((n, f) => n + f.parts.length, 0) + " × " + fmt(m.chunkSize);
-}).catch(() => bad("Could not read manifest.json from " + BASE));
-
-const SHELL =
-  '<style>html,body{margin:0;height:100%;overflow:hidden;background:#000}' +
-  '#unity-canvas{position:fixed;left:0;top:0;display:block}' +
-  '#boot{position:fixed;left:0;right:0;top:50%;transform:translateY(-50%);' +
-  'text-align:center;color:#8bc34a;font:15px ui-monospace,Menlo,monospace}</style>' +
-  '<canvas id="unity-canvas" tabindex="-1"></canvas><div id="boot">starting…</div>';
-
-/* The boot program is embedded, not fetched. Fetching it from the CDN meant
-   running whatever jsDelivr had cached for the branch (up to ~12h stale), and
-   raw.githubusercontent.com serves .js as text/plain + nosniff which browsers
-   refuse to execute. Regenerate with build.py after editing boot.js. */
+/* The boot program and the expected digests are embedded, never fetched:
+   jsDelivr caches @branch URLs for ~12h, so a fetched copy would keep running
+   the previous version long after a push. Regenerate with build.py. */
 /*__BOOT_SRC__*/null
 /*__DIGESTS__*/null
 
+const play = document.getElementById("play");
+const bar  = document.getElementById("bar");
+const fill = document.getElementById("fill");
+const msg  = document.getElementById("msg");
+
+/* same markup in the child window, so boot.js drives either one */
+const SHELL =
+  '<style>html,body{margin:0;height:100%;overflow:hidden;background:#000;' +
+  'font:15px ui-sans-serif,system-ui,sans-serif}' +
+  '#unity-canvas{position:fixed;left:0;top:0;display:block}' +
+  '#ui{position:fixed;left:50%;top:50%;transform:translate(-50%,-50%);width:min(380px,80vw)}' +
+  '#bar{height:10px;background:#24341f;border-radius:999px;overflow:hidden}' +
+  '#fill{height:100%;width:0;background:#8bc34a;transition:width .18s ease}' +
+  '#msg{margin-top:10px;font-size:13px;color:#9ab094;text-align:center}' +
+  '#msg.bad{color:#ff8a7a}</style>' +
+  '<canvas id="unity-canvas" tabindex="-1"></canvas>' +
+  '<div id="ui"><div id="bar"><div id="fill"></div></div><div id="msg"></div></div>';
+
 function boot(doc, win) {
   win.__PVZ_BASE__ = BASE;
-  /* digests are embedded too: manifest.json is fetched from the CDN and can be
-     up to ~12h stale, so it is not a trustworthy source for the expected hashes */
   win.__PVZ_DIGESTS__ = DIGESTS;
+  /* mirror the child's progress onto this page's bar */
+  win.__PVZ_PROGRESS__ = (frac, text, isBad) => {
+    fill.style.width = Math.round(frac * 100) + "%";
+    msg.textContent = text || "";
+    msg.className = isBad ? "bad" : "";
+  };
   const el = doc.createElement("script");
   el.textContent = BOOT_SRC;
   doc.head.appendChild(el);
 }
 
-/* fallback when the browser blocks the popup: take over this tab */
 function bootHere() {
   document.body.innerHTML = SHELL;
   boot(document, window);
 }
 
 play.addEventListener("click", () => {
-  const win = window.open("about:blank", "_blank");
+  play.disabled = true;
+  bar.hidden = false;
+  fill.style.width = "0%";
+  msg.className = "";
+  msg.textContent = "Opening…";
 
+  const win = window.open("about:blank", "_blank");
   if (!win) {
-    bad("The popup was blocked — allow popups for this page, or:");
-    const alt = document.createElement("button");
-    alt.textContent = "Play in this tab instead";
-    alt.style.marginTop = "10px";
-    alt.addEventListener("click", bootHere);
-    note.appendChild(alt);
-    play.disabled = true;
+    msg.className = "bad";
+    msg.textContent = "Popup blocked — loading here instead…";
+    bootHere();
     return;
   }
-
   win.document.write(
     '<!doctype html><meta charset="utf-8"><title>Plants vs Zombies Fusion</title>' + SHELL
   );
   win.document.close();
   boot(win.document, win);
-
-  note.className = "";
-  note.textContent = "Launched in a new tab. Keep this tab open.";
-  play.disabled = true;
-  setTimeout(() => { play.disabled = false; }, 3000);
 });
 </script>

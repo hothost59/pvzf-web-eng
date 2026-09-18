@@ -1,10 +1,18 @@
-/* Runs inside the about:blank window. Fetches chunks, reassembles, starts Unity. */
+/* Runs in the launcher's window or the about:blank child.
+   Fetches the chunks, verifies them, starts Unity. */
 (function () {
   var BASE = window.__PVZ_BASE__ || "./";
   var DIGESTS = window.__PVZ_DIGESTS__ || null;
+
   var canvas = document.getElementById("unity-canvas");
-  var msg = document.getElementById("boot");
-  function say(t) { if (msg) msg.textContent = t; }
+  var fill = document.getElementById("fill");
+  var msg = document.getElementById("msg");
+
+  function show(frac, text, bad) {
+    if (fill) fill.style.width = Math.round(frac * 100) + "%";
+    if (msg) { msg.textContent = text || ""; msg.className = bad ? "bad" : ""; }
+    try { if (window.__PVZ_PROGRESS__) window.__PVZ_PROGRESS__(frac, text, bad); } catch (e) {}
+  }
 
   function fit() {
     var w = window.innerWidth, h = window.innerHeight;
@@ -14,11 +22,9 @@
   fit(); window.addEventListener("resize", fit);
 
   /* Retries MUST bypass the HTTP cache. jsDelivr answers 403 ("Package size
-     exceeded...") on a file it has not pulled from origin yet, and that error
+     exceeded...") for a file it has not pulled from origin yet, and that error
      response is cacheable - with cache:"force-cache" every retry replays the
-     cached 403 in a few ms without hitting the network, so the download can
-     never recover. The same applies to a truncated 200. First attempt may use
-     the cache (fast relaunches); every retry forces a fresh request. */
+     cached 403 in a few ms and the download can never recover. */
   function get(url, type, attempt, fresh) {
     attempt = attempt || 0;
     return fetch(url, { cache: fresh ? "reload" : "force-cache" }).then(function (r) {
@@ -26,29 +32,26 @@
         var retriable = r.status === 403 || r.status === 429 || r.status >= 500;
         if (retriable && attempt < 8) {
           var wait = Math.min(1000 * Math.pow(2, attempt), 10000);
-          say("waiting for CDN on " + url.split("/").pop() + " (HTTP " + r.status + ")");
           return new Promise(function (ok) { setTimeout(ok, wait); })
             .then(function () { return get(url, type, attempt + 1, true); });
         }
-        throw new Error(url + " -> HTTP " + r.status);
+        throw new Error(url.split("/").pop() + " -> HTTP " + r.status);
       }
       return type === "text" ? r.text() : r.arrayBuffer();
     });
   }
 
-  var done = 0, totalParts = 0;
-  function tick() { say("downloading " + done + "/" + totalParts + " parts"); }
+  var done = 0, totalParts = 1;
+  function tick() { show(0.8 * (done / totalParts), "Downloading " + done + " / " + totalParts); }
 
-  /* A chunk can come back HTTP 200 but short: the CDN uses chunked transfer
+  /* A chunk can arrive HTTP 200 but short: the CDN uses chunked transfer
      encoding (no Content-Length), so a dropped connection looks like a clean
-     small response. Every part is checked against the size in the manifest and
-     refetched if it does not match, otherwise the build corrupts silently. */
+     small response. Check every part against the manifest and refetch. */
   function fetchPart(part, tries) {
     tries = tries || 0;
     return get(BASE + "chunks/" + part.name, null, 0, tries > 0).then(function (ab) {
       if (ab.byteLength === part.size) return ab;
       if (tries < 5) {
-        say("short read on " + part.name + " (" + ab.byteLength + "/" + part.size + "), refetching");
         return new Promise(function (ok) { setTimeout(ok, 800 * (tries + 1)); })
           .then(function () { return fetchPart(part, tries + 1); });
       }
@@ -56,7 +59,6 @@
     });
   }
 
-  // fetch one file's chunks with limited concurrency, preserving order
   function fetchChunks(spec) {
     var parts = spec.parts, buf = new Uint8Array(spec.total), at = [], off = 0;
     parts.forEach(function (p) { at.push(off); off += p.size; });
@@ -97,36 +99,26 @@
     return ((c ^ 0xFFFFFFFF) >>> 0).toString(16).padStart(8, "0");
   }
 
-  /* Integrity is never skipped. crypto.subtle only exists in a secure context,
-     so opening the launcher from file:// (origin null) has no SHA-256 - that is
-     exactly when a corrupt download goes unnoticed and surfaces later as a wasm
-     "function signature mismatch". CRC32 in plain JS covers that case. */
+  /* Never skipped. crypto.subtle does not exist over file:// (origin null, not
+     a secure context) - exactly where silent corruption would slip through and
+     later surface as a wasm "function signature mismatch". */
   function verify(name, buf, want) {
     var expect = (DIGESTS && DIGESTS[name]) || want || {};
+    show(0.82, "Verifying " + name);
     if (self.crypto && self.crypto.subtle && expect.sha256) {
-      say("verifying " + name + " (sha256)");
       return crypto.subtle.digest("SHA-256", buf).then(function (d) {
-        var got = hex(d);
-        if (got !== expect.sha256) {
-          throw new Error(name + " is corrupt: sha256 " + got.slice(0, 16) +
-            " != " + expect.sha256.slice(0, 16) + " - reload to refetch");
-        }
+        if (hex(d) !== expect.sha256) throw new Error(name + " is corrupt - reload to refetch");
         return buf;
       });
     }
     if (expect.crc32) {
-      say("verifying " + name + " (crc32)");
-      var got = crc32(buf);
-      if (got !== expect.crc32) {
-        throw new Error(name + " is corrupt: crc32 " + got + " != " + expect.crc32 +
-          " - reload to refetch");
-      }
+      if (crc32(buf) !== expect.crc32) throw new Error(name + " is corrupt - reload to refetch");
       return Promise.resolve(buf);
     }
-    throw new Error("no checksum available for " + name + "; refusing to boot");
+    throw new Error("no checksum for " + name + "; refusing to boot");
   }
 
-  say("fetching manifest");
+  show(0.02, "Starting");
   get(BASE + "manifest.json", "text").then(function (t) {
     var man = JSON.parse(t);
     totalParts = man.files.data.parts.length + man.files.wasm.parts.length;
@@ -138,35 +130,31 @@
       get(BASE + "build.framework.js", "text")
     ]);
   }).then(function (r) {
-    var dataBuf = r[0], wasmBuf = r[1], loaderSrc = r[2], frameworkSrc = r[3];
-    say("starting engine");
+    show(0.85, "Starting engine");
+    var dataUrl = URL.createObjectURL(new Blob([r[0]], { type: "application/octet-stream" }));
+    var codeUrl = URL.createObjectURL(new Blob([r[1]], { type: "application/wasm" }));
+    var fwUrl = URL.createObjectURL(new Blob([r[3]], { type: "text/javascript" }));
 
-    var dataUrl = URL.createObjectURL(new Blob([dataBuf], { type: "application/octet-stream" }));
-    var codeUrl = URL.createObjectURL(new Blob([wasmBuf], { type: "application/wasm" }));
-    var fwUrl   = URL.createObjectURL(new Blob([frameworkSrc], { type: "text/javascript" }));
-
-    // run the Unity loader in this document
     var s = document.createElement("script");
-    s.textContent = loaderSrc;
+    s.textContent = r[2];
     document.head.appendChild(s);
 
     return createUnityInstance(canvas, {
-      dataUrl: dataUrl,
-      frameworkUrl: fwUrl,
-      codeUrl: codeUrl,
+      dataUrl: dataUrl, frameworkUrl: fwUrl, codeUrl: codeUrl,
       streamingAssetsUrl: "StreamingAssets",
-      companyName: "LanPiaoPiao",
-      productName: "PlantsVsZombiesRH",
-      productVersion: "1.0",
+      companyName: "LanPiaoPiao", productName: "PlantsVsZombiesRH", productVersion: "1.0",
       matchWebGLToCanvasSize: true
-    }, function (p) { say("loading " + Math.round(p * 100) + "%"); })
+    }, function (p) { show(0.85 + p * 0.15, "Loading"); })
     .then(function () {
+      show(1, "");
+      var bar = document.getElementById("bar");
+      if (bar) bar.remove();
       if (msg) msg.remove();
       URL.revokeObjectURL(dataUrl); URL.revokeObjectURL(codeUrl); URL.revokeObjectURL(fwUrl);
       fit();
     });
   }).catch(function (e) {
-    say("failed: " + (e && e.message ? e.message : e));
+    show(0, (e && e.message) ? e.message : String(e), true);
     console.error(e);
   });
 })();
