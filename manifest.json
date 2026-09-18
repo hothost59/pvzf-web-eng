@@ -1,0 +1,85 @@
+{
+ "chunkSize": 15000000,
+ "files": {
+  "data": {
+   "total": 202021342,
+   "sha256": "d8122a389ffaf273c65df2c8ed01c249910812078e909f5be1bcd96b47e3b9fa",
+   "parts": [
+    {
+     "name": "data.000",
+     "size": 15000000
+    },
+    {
+     "name": "data.001",
+     "size": 15000000
+    },
+    {
+     "name": "data.002",
+     "size": 15000000
+    },
+    {
+     "name": "data.003",
+     "size": 15000000
+    },
+    {
+     "name": "data.004",
+     "size": 15000000
+    },
+    {
+     "name": "data.005",
+     "size": 15000000
+    },
+    {
+     "name": "data.006",
+     "size": 15000000
+    },
+    {
+     "name": "data.007",
+     "size": 15000000
+    },
+    {
+     "name": "data.008",
+     "size": 15000000
+    },
+    {
+     "name": "data.009",
+     "size": 15000000
+    },
+    {
+     "name": "data.010",
+     "size": 15000000
+    },
+    {
+     "name": "data.011",
+     "size": 15000000
+    },
+    {
+     "name": "data.012",
+     "size": 15000000
+    },
+    {
+     "name": "data.013",
+     "size": 7021342
+    }
+   ]
+  },
+  "wasm": {
+   "total": 38285315,
+   "sha256": "34d038ccc94a6dc7df0719d7cb4bc8054562f0af3470c9e0825d5cc219e33aab",
+   "parts": [
+    {
+     "name": "wasm.000",
+     "size": 15000000
+    },
+    {
+     "name": "wasm.001",
+     "size": 15000000
+    },
+    {
+     "name": "wasm.002",
+     "size": 8285315
+    }
+   ]
+  }
+ }
+}

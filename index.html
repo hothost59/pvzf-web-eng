@@ -1,0 +1,131 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>Plants vs Zombies Fusion</title>
+<style>
+  :root{
+    --bg:#10180f; --panel:#1b2a19; --edge:#2f4a2c;
+    --ink:#e8f3e4; --dim:#9ab094; --accent:#8bc34a; --accent-ink:#10180f;
+  }
+  html,body{height:100%;margin:0}
+  body{
+    background:radial-gradient(ellipse at 50% -10%,#1e3019,var(--bg) 70%);
+    color:var(--ink);
+    font:15px/1.55 ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+    display:grid;place-items:center;padding:24px;box-sizing:border-box;
+  }
+  .card{
+    width:100%;max-width:560px;background:var(--panel);
+    border:1px solid var(--edge);border-radius:14px;padding:28px 26px;
+    box-shadow:0 18px 50px rgba(0,0,0,.45);
+  }
+  h1{margin:0 0 4px;font-size:22px;letter-spacing:.2px}
+  .sub{margin:0 0 22px;color:var(--dim);font-size:13px}
+  button{
+    appearance:none;border:0;border-radius:10px;cursor:pointer;
+    background:var(--accent);color:var(--accent-ink);
+    font:600 16px/1 inherit;padding:14px 22px;width:100%;
+    transition:filter .12s ease,transform .06s ease;
+  }
+  button:hover{filter:brightness(1.08)}
+  button:active{transform:translateY(1px)}
+  button[disabled]{filter:grayscale(.6) brightness(.8);cursor:default}
+  .meta{margin-top:20px;border-top:1px solid var(--edge);padding-top:16px;
+        color:var(--dim);font-size:12.5px}
+  .meta code{color:var(--ink);background:#0d140c;padding:1px 5px;border-radius:4px;
+             font:12px/1 ui-monospace,SFMono-Regular,Menlo,monospace}
+  .row{display:flex;justify-content:space-between;gap:12px;padding:2px 0}
+  #note{margin-top:14px;font-size:13px;color:var(--dim);min-height:1.5em}
+  #note.bad{color:#ff8a7a}
+</style>
+
+<div class="card">
+  <h1>Plants vs Zombies Fusion</h1>
+  <p class="sub">WebGL build 2.0.4 &middot; English &middot; served in pieces from jsDelivr</p>
+
+  <button id="play">Play</button>
+  <div id="note"></div>
+
+  <div class="meta">
+    <div class="row"><span>Source</span><span id="m-src">&mdash;</span></div>
+    <div class="row"><span>Download</span><span id="m-size">&mdash;</span></div>
+    <div class="row"><span>Parts</span><span id="m-parts">&mdash;</span></div>
+    <p style="margin:12px 0 0">Opens in a blank tab. The whole build is fetched into
+    memory before the game starts, so the first launch takes a while and needs about
+    <strong>1&nbsp;GB</strong> of free RAM. Cached by the browser afterwards.</p>
+  </div>
+</div>
+
+<script>
+/* ------------------------------------------------------------------
+   Point this at your GitHub repo, e.g. "shiyiwei/pvz-fusion-web@main".
+   Leave empty to load the files sitting next to this page instead.
+   ------------------------------------------------------------------ */
+const REPO = "";
+const SUBDIR = "";   // set if the files live in a folder inside the repo
+
+const BASE = REPO
+  ? "https://cdn.jsdelivr.net/gh/" + REPO + "/" + (SUBDIR ? SUBDIR.replace(/^\/|\/$/g, "") + "/" : "")
+  : new URL(".", location.href).href;
+
+const note = document.getElementById("note");
+const play = document.getElementById("play");
+
+function fmt(b) { return (b / 1048576).toFixed(0) + " MB"; }
+function bad(t) { note.className = "bad"; note.textContent = t; }
+
+document.getElementById("m-src").textContent = REPO ? "jsDelivr" : "same folder";
+
+fetch(BASE + "manifest.json").then(r => r.json()).then(m => {
+  const files = Object.values(m.files);
+  document.getElementById("m-size").textContent =
+    fmt(files.reduce((n, f) => n + f.total, 0));
+  document.getElementById("m-parts").textContent =
+    files.reduce((n, f) => n + f.parts.length, 0) + " × " + fmt(m.chunkSize);
+}).catch(() => bad("Could not read manifest.json from " + BASE));
+
+const SHELL =
+  '<style>html,body{margin:0;height:100%;overflow:hidden;background:#000}' +
+  '#unity-canvas{position:fixed;left:0;top:0;display:block}' +
+  '#boot{position:fixed;left:0;right:0;top:50%;transform:translateY(-50%);' +
+  'text-align:center;color:#8bc34a;font:15px ui-monospace,Menlo,monospace}</style>' +
+  '<canvas id="unity-canvas" tabindex="-1"></canvas><div id="boot">starting…</div>';
+
+function boot(doc, win) {
+  win.__PVZ_BASE__ = BASE;
+  const s = doc.createElement("script");
+  s.src = BASE + "boot.js";
+  doc.head.appendChild(s);
+}
+
+/* fallback when the browser blocks the popup: take over this tab */
+function bootHere() {
+  document.body.innerHTML = SHELL;
+  boot(document, window);
+}
+
+play.addEventListener("click", () => {
+  const win = window.open("about:blank", "_blank");
+
+  if (!win) {
+    bad("The popup was blocked — allow popups for this page, or:");
+    const alt = document.createElement("button");
+    alt.textContent = "Play in this tab instead";
+    alt.style.marginTop = "10px";
+    alt.addEventListener("click", bootHere);
+    note.appendChild(alt);
+    play.disabled = true;
+    return;
+  }
+
+  win.document.write(
+    '<!doctype html><meta charset="utf-8"><title>Plants vs Zombies Fusion</title>' + SHELL
+  );
+  win.document.close();
+  boot(win.document, win);
+
+  note.className = "";
+  note.textContent = "Launched in a new tab. Keep this tab open.";
+  play.disabled = true;
+  setTimeout(() => { play.disabled = false; }, 3000);
+});
+</script>
