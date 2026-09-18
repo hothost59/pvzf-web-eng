@@ -40,7 +40,7 @@
 
 <div class="card">
   <h1>Plants vs Zombies Fusion</h1>
-  <p class="sub">WebGL build 2.0.4 &middot; English &middot; served in pieces from jsDelivr</p>
+  <p class="sub">WebGL build 2.0.4 &middot; English &middot; reassembled from 17 pieces</p>
 
   <button id="play">Play</button>
   <div id="note"></div>
@@ -57,15 +57,27 @@
 
 <script>
 /* ------------------------------------------------------------------
-   Point this at your GitHub repo, e.g. "shiyiwei/pvz-fusion-web@main".
-   Leave empty to load the files sitting next to this page instead.
+   REPO     "user/repo@branch"
+   SOURCE   where the chunks are fetched from:
+              "jsdelivr" - cdn.jsdelivr.net. Works because each chunk is
+                           requested as its own file; jsDelivr only refuses
+                           when it has to package the repo. Cold files can
+                           answer 403 briefly - boot.js retries those.
+              "raw"      - raw.githubusercontent.com. No CDN, may rate-limit.
+              "local"    - same folder as this page (use with GitHub Pages).
+   Chunks are size-checked against manifest.json and the assembled files are
+   SHA-256 verified, because a dropped connection can return HTTP 200 with a
+   short body.
    ------------------------------------------------------------------ */
-const REPO = "";
-const SUBDIR = "";   // set if the files live in a folder inside the repo
+const REPO   = "hothost59/pvzf-web-eng@main";
+const SOURCE = "jsdelivr";
 
-const BASE = REPO
-  ? "https://cdn.jsdelivr.net/gh/" + REPO + "/" + (SUBDIR ? SUBDIR.replace(/^\/|\/$/g, "") + "/" : "")
-  : new URL(".", location.href).href;
+const [REPO_PATH, REPO_REF] = REPO.split("@");
+const REF = REPO_REF || "main";
+const BASE =
+  SOURCE === "jsdelivr" ? "https://cdn.jsdelivr.net/gh/" + REPO_PATH + "@" + REF + "/" :
+  SOURCE === "raw"      ? "https://raw.githubusercontent.com/" + REPO_PATH + "/" + REF + "/" :
+                          new URL(".", location.href).href;
 
 const note = document.getElementById("note");
 const play = document.getElementById("play");
@@ -73,7 +85,9 @@ const play = document.getElementById("play");
 function fmt(b) { return (b / 1048576).toFixed(0) + " MB"; }
 function bad(t) { note.className = "bad"; note.textContent = t; }
 
-document.getElementById("m-src").textContent = REPO ? "jsDelivr" : "same folder";
+document.getElementById("m-src").textContent =
+  SOURCE === "jsdelivr" ? "jsDelivr" :
+  SOURCE === "raw" ? "raw.githubusercontent.com" : "this site";
 
 fetch(BASE + "manifest.json").then(r => r.json()).then(m => {
   const files = Object.values(m.files);
@@ -90,11 +104,17 @@ const SHELL =
   'text-align:center;color:#8bc34a;font:15px ui-monospace,Menlo,monospace}</style>' +
   '<canvas id="unity-canvas" tabindex="-1"></canvas><div id="boot">starting…</div>';
 
+/* The boot program is embedded, not fetched. Fetching it from the CDN meant
+   running whatever jsDelivr had cached for the branch (up to ~12h stale), and
+   raw.githubusercontent.com serves .js as text/plain + nosniff which browsers
+   refuse to execute. Regenerate with build.py after editing boot.js. */
+const BOOT_SRC = "/* Runs inside the about:blank window. Fetches chunks, reassembles, starts Unity. */\n(function () {\n  var BASE = window.__PVZ_BASE__ || \"./\";\n  var canvas = document.getElementById(\"unity-canvas\");\n  var msg = document.getElementById(\"boot\");\n  function say(t) { if (msg) msg.textContent = t; }\n\n  function fit() {\n    var w = window.innerWidth, h = window.innerHeight;\n    canvas.style.width = w + \"px\"; canvas.style.height = h + \"px\";\n    canvas.width = w; canvas.height = h;\n  }\n  fit(); window.addEventListener(\"resize\", fit);\n\n  /* Retries MUST bypass the HTTP cache. jsDelivr answers 403 (\"Package size\n     exceeded...\") on a file it has not pulled from origin yet, and that error\n     response is cacheable - with cache:\"force-cache\" every retry replays the\n     cached 403 in a few ms without hitting the network, so the download can\n     never recover. The same applies to a truncated 200. First attempt may use\n     the cache (fast relaunches); every retry forces a fresh request. */\n  function get(url, type, attempt, fresh) {\n    attempt = attempt || 0;\n    return fetch(url, { cache: fresh ? \"reload\" : \"force-cache\" }).then(function (r) {\n      if (!r.ok) {\n        var retriable = r.status === 403 || r.status === 429 || r.status >= 500;\n        if (retriable && attempt < 8) {\n          var wait = Math.min(1000 * Math.pow(2, attempt), 10000);\n          say(\"waiting for CDN on \" + url.split(\"/\").pop() + \" (HTTP \" + r.status + \")\");\n          return new Promise(function (ok) { setTimeout(ok, wait); })\n            .then(function () { return get(url, type, attempt + 1, true); });\n        }\n        throw new Error(url + \" -> HTTP \" + r.status);\n      }\n      return type === \"text\" ? r.text() : r.arrayBuffer();\n    });\n  }\n\n  var done = 0, totalParts = 0;\n  function tick() { say(\"downloading \" + done + \"/\" + totalParts + \" parts\"); }\n\n  /* A chunk can come back HTTP 200 but short: the CDN uses chunked transfer\n     encoding (no Content-Length), so a dropped connection looks like a clean\n     small response. Every part is checked against the size in the manifest and\n     refetched if it does not match, otherwise the build corrupts silently. */\n  function fetchPart(part, tries) {\n    tries = tries || 0;\n    return get(BASE + \"chunks/\" + part.name, null, 0, tries > 0).then(function (ab) {\n      if (ab.byteLength === part.size) return ab;\n      if (tries < 5) {\n        say(\"short read on \" + part.name + \" (\" + ab.byteLength + \"/\" + part.size + \"), refetching\");\n        return new Promise(function (ok) { setTimeout(ok, 800 * (tries + 1)); })\n          .then(function () { return fetchPart(part, tries + 1); });\n      }\n      throw new Error(part.name + \" truncated: \" + ab.byteLength + \" of \" + part.size);\n    });\n  }\n\n  // fetch one file's chunks with limited concurrency, preserving order\n  function fetchChunks(spec) {\n    var parts = spec.parts, buf = new Uint8Array(spec.total), at = [], off = 0;\n    parts.forEach(function (p) { at.push(off); off += p.size; });\n    var next = 0, LIMIT = 3;\n    function worker() {\n      if (next >= parts.length) return Promise.resolve();\n      var i = next++;\n      return fetchPart(parts[i]).then(function (ab) {\n        buf.set(new Uint8Array(ab), at[i]);\n        done++; tick();\n        return worker();\n      });\n    }\n    var runners = [];\n    for (var k = 0; k < Math.min(LIMIT, parts.length); k++) runners.push(worker());\n    return Promise.all(runners).then(function () { return buf; });\n  }\n\n  function hex(ab) {\n    return Array.prototype.map.call(new Uint8Array(ab), function (b) {\n      return (\"0\" + b.toString(16)).slice(-2);\n    }).join(\"\");\n  }\n\n  /* Final whole-file check. crypto.subtle only exists in a secure context\n     (https or localhost), so over plain http or file:// this is skipped and\n     the per-part size checks above are what stands. */\n  function verify(name, buf, want) {\n    if (!self.crypto || !self.crypto.subtle) return Promise.resolve(buf);\n    say(\"verifying \" + name);\n    return crypto.subtle.digest(\"SHA-256\", buf).then(function (d) {\n      var got = hex(d);\n      if (got !== want) throw new Error(name + \" checksum mismatch: \" + got.slice(0, 16) + \" != \" + want.slice(0, 16));\n      return buf;\n    });\n  }\n\n  say(\"fetching manifest\");\n  get(BASE + \"manifest.json\", \"text\").then(function (t) {\n    var man = JSON.parse(t);\n    totalParts = man.files.data.parts.length + man.files.wasm.parts.length;\n    tick();\n    return Promise.all([\n      fetchChunks(man.files.data).then(function (b) { return verify(\"build.data\", b, man.files.data.sha256); }),\n      fetchChunks(man.files.wasm).then(function (b) { return verify(\"build.wasm\", b, man.files.wasm.sha256); }),\n      get(BASE + \"build.loader.js\", \"text\"),\n      get(BASE + \"build.framework.js\", \"text\")\n    ]);\n  }).then(function (r) {\n    var dataBuf = r[0], wasmBuf = r[1], loaderSrc = r[2], frameworkSrc = r[3];\n    say(\"starting engine\");\n\n    var dataUrl = URL.createObjectURL(new Blob([dataBuf], { type: \"application/octet-stream\" }));\n    var codeUrl = URL.createObjectURL(new Blob([wasmBuf], { type: \"application/wasm\" }));\n    var fwUrl   = URL.createObjectURL(new Blob([frameworkSrc], { type: \"text/javascript\" }));\n\n    // run the Unity loader in this document\n    var s = document.createElement(\"script\");\n    s.textContent = loaderSrc;\n    document.head.appendChild(s);\n\n    return createUnityInstance(canvas, {\n      dataUrl: dataUrl,\n      frameworkUrl: fwUrl,\n      codeUrl: codeUrl,\n      streamingAssetsUrl: \"StreamingAssets\",\n      companyName: \"LanPiaoPiao\",\n      productName: \"PlantsVsZombiesRH\",\n      productVersion: \"1.0\",\n      matchWebGLToCanvasSize: true\n    }, function (p) { say(\"loading \" + Math.round(p * 100) + \"%\"); })\n    .then(function () {\n      if (msg) msg.remove();\n      URL.revokeObjectURL(dataUrl); URL.revokeObjectURL(codeUrl); URL.revokeObjectURL(fwUrl);\n      fit();\n    });\n  }).catch(function (e) {\n    say(\"failed: \" + (e && e.message ? e.message : e));\n    console.error(e);\n  });\n})();\n";
+
 function boot(doc, win) {
   win.__PVZ_BASE__ = BASE;
-  const s = doc.createElement("script");
-  s.src = BASE + "boot.js";
-  doc.head.appendChild(s);
+  const el = doc.createElement("script");
+  el.textContent = BOOT_SRC;
+  doc.head.appendChild(el);
 }
 
 /* fallback when the browser blocks the popup: take over this tab */
