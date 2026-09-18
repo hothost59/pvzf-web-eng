@@ -47,6 +47,27 @@ after. Two things are required to survive that:
 
 Concurrency is limited to 3 requests, which measurably reduced truncation.
 
+### Integrity is never skipped
+
+A corrupt download does not fail loudly — it surfaces much later as a wasm
+`RuntimeError: function signature mismatch`, because IL2CPP metadata lives inside
+`build.data`, so damaged bytes become bad method pointers.
+
+Both assembled files are therefore checksummed before Unity sees them:
+
+- secure context (https, or http://localhost) -> **SHA-256** via `crypto.subtle`
+- otherwise -> **CRC32** in plain JS
+
+The fallback matters because `crypto.subtle` does not exist over `file://`
+(origin `null`, not a secure context), which is exactly the case where a silent
+skip would hide corruption. Expected digests are embedded in `index.html` by
+`build.py`, not read from `manifest.json`, since the CDN copy of the manifest can
+be stale. If a checksum fails the loader refuses to boot and says to reload.
+
+**Prefer serving over http://localhost or GitHub Pages rather than opening
+`index.html` from disk** — SHA-256 is hardware-accelerated and the whole boot is
+several seconds faster than the JS CRC32 path (~17s vs ~11s here).
+
 ### The boot code is embedded, not fetched
 
 `index.html` contains `boot.js` inline. Do not change this back to fetching it.

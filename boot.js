@@ -1,6 +1,7 @@
 /* Runs inside the about:blank window. Fetches chunks, reassembles, starts Unity. */
 (function () {
   var BASE = window.__PVZ_BASE__ || "./";
+  var DIGESTS = window.__PVZ_DIGESTS__ || null;
   var canvas = document.getElementById("unity-canvas");
   var msg = document.getElementById("boot");
   function say(t) { if (msg) msg.textContent = t; }
@@ -80,17 +81,49 @@
     }).join("");
   }
 
-  /* Final whole-file check. crypto.subtle only exists in a secure context
-     (https or localhost), so over plain http or file:// this is skipped and
-     the per-part size checks above are what stands. */
+  var CRC_T = (function () {
+    var t = new Uint32Array(256);
+    for (var n = 0; n < 256; n++) {
+      var c = n;
+      for (var k = 0; k < 8; k++) c = (c & 1) ? (0xEDB88320 ^ (c >>> 1)) : (c >>> 1);
+      t[n] = c >>> 0;
+    }
+    return t;
+  })();
+
+  function crc32(buf) {
+    var c = 0xFFFFFFFF;
+    for (var i = 0; i < buf.length; i++) c = CRC_T[(c ^ buf[i]) & 0xFF] ^ (c >>> 8);
+    return ((c ^ 0xFFFFFFFF) >>> 0).toString(16).padStart(8, "0");
+  }
+
+  /* Integrity is never skipped. crypto.subtle only exists in a secure context,
+     so opening the launcher from file:// (origin null) has no SHA-256 - that is
+     exactly when a corrupt download goes unnoticed and surfaces later as a wasm
+     "function signature mismatch". CRC32 in plain JS covers that case. */
   function verify(name, buf, want) {
-    if (!self.crypto || !self.crypto.subtle) return Promise.resolve(buf);
-    say("verifying " + name);
-    return crypto.subtle.digest("SHA-256", buf).then(function (d) {
-      var got = hex(d);
-      if (got !== want) throw new Error(name + " checksum mismatch: " + got.slice(0, 16) + " != " + want.slice(0, 16));
-      return buf;
-    });
+    var expect = (DIGESTS && DIGESTS[name]) || want || {};
+    if (self.crypto && self.crypto.subtle && expect.sha256) {
+      say("verifying " + name + " (sha256)");
+      return crypto.subtle.digest("SHA-256", buf).then(function (d) {
+        var got = hex(d);
+        if (got !== expect.sha256) {
+          throw new Error(name + " is corrupt: sha256 " + got.slice(0, 16) +
+            " != " + expect.sha256.slice(0, 16) + " - reload to refetch");
+        }
+        return buf;
+      });
+    }
+    if (expect.crc32) {
+      say("verifying " + name + " (crc32)");
+      var got = crc32(buf);
+      if (got !== expect.crc32) {
+        throw new Error(name + " is corrupt: crc32 " + got + " != " + expect.crc32 +
+          " - reload to refetch");
+      }
+      return Promise.resolve(buf);
+    }
+    throw new Error("no checksum available for " + name + "; refusing to boot");
   }
 
   say("fetching manifest");
@@ -99,8 +132,8 @@
     totalParts = man.files.data.parts.length + man.files.wasm.parts.length;
     tick();
     return Promise.all([
-      fetchChunks(man.files.data).then(function (b) { return verify("build.data", b, man.files.data.sha256); }),
-      fetchChunks(man.files.wasm).then(function (b) { return verify("build.wasm", b, man.files.wasm.sha256); }),
+      fetchChunks(man.files.data).then(function (b) { return verify("build.data", b, man.files.data); }),
+      fetchChunks(man.files.wasm).then(function (b) { return verify("build.wasm", b, man.files.wasm); }),
       get(BASE + "build.loader.js", "text"),
       get(BASE + "build.framework.js", "text")
     ]);

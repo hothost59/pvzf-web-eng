@@ -109,9 +109,13 @@ const SHELL =
    raw.githubusercontent.com serves .js as text/plain + nosniff which browsers
    refuse to execute. Regenerate with build.py after editing boot.js. */
 /*__BOOT_SRC__*/null
+/*__DIGESTS__*/null
 
 function boot(doc, win) {
   win.__PVZ_BASE__ = BASE;
+  /* digests are embedded too: manifest.json is fetched from the CDN and can be
+     up to ~12h stale, so it is not a trustworthy source for the expected hashes */
+  win.__PVZ_DIGESTS__ = DIGESTS;
   const el = doc.createElement("script");
   el.textContent = BOOT_SRC;
   doc.head.appendChild(el);
